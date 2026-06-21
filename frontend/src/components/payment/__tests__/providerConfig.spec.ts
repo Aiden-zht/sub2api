@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { PAYMENT_CURRENCY_OPTIONS, PROVIDER_CALLBACK_PATHS, PROVIDER_CONFIG_FIELDS, PROVIDER_SUPPORTED_TYPES, getDefaultNotifyBaseUrl, isProviderEnabledForPaymentTypes } from '@/components/payment/providerConfig'
+import { PAYMENT_CURRENCY_OPTIONS, PROVIDER_CALLBACK_PATHS, PROVIDER_CONFIG_FIELDS, PROVIDER_SUPPORTED_TYPES, getDefaultNotifyBaseUrl, isProviderEnabledForPaymentTypes, providerSupportsRefund } from '@/components/payment/providerConfig'
 
 function findField(providerKey: string, key: string) {
   const fields = PROVIDER_CONFIG_FIELDS[providerKey] || []
@@ -84,5 +84,11 @@ describe('getDefaultNotifyBaseUrl', () => {
 
   it('prefers an absolute API base URL when configured', () => {
     expect(getDefaultNotifyBaseUrl('http://app.example.com', 'https://api.example.com/api/v1')).toBe('https://api.example.com')
+  })
+})
+
+describe('providerSupportsRefund', () => {
+  it('treats XunhuPay as refund-capable once refund parity is implemented', () => {
+    expect(providerSupportsRefund('xunhupay')).toBe(true)
   })
 })

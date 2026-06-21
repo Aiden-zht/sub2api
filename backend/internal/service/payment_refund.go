@@ -227,6 +227,9 @@ func (s *PaymentService) PrepareRefund(ctx context.Context, oid int64, amt float
 		amt = o.Amount
 	}
 	orderCurrency := PaymentOrderCurrency(o)
+	if refundRequiresFullAmount(inst.ProviderKey) && math.Abs(amt-o.Amount) > paymentAmountToleranceForCurrency(orderCurrency) {
+		return nil, nil, infraerrors.BadRequest("PARTIAL_REFUND_UNSUPPORTED", "provider only supports full refund")
+	}
 	if amt-o.Amount > paymentAmountToleranceForCurrency(orderCurrency) {
 		return nil, nil, infraerrors.BadRequest("REFUND_AMOUNT_EXCEEDED", "refund amount exceeds recharge")
 	}
@@ -316,29 +319,33 @@ func (s *PaymentService) ExecuteRefund(ctx context.Context, p *RefundPlan) (*Ref
 			p.SubDaysToDeduct = 0
 		}
 	}
-	if err := s.gwRefund(ctx, p); err != nil {
+	resp, err := s.gwRefund(ctx, p)
+	if err != nil {
 		return s.handleGwFail(ctx, p, err)
+	}
+	if resp != nil && resp.Status == payment.ProviderStatusPending {
+		return s.markRefundPending(ctx, p, resp)
 	}
 	return s.markRefundOk(ctx, p)
 }
 
-func (s *PaymentService) gwRefund(ctx context.Context, p *RefundPlan) error {
+func (s *PaymentService) gwRefund(ctx context.Context, p *RefundPlan) (*payment.RefundResponse, error) {
 	if p.Order.PaymentTradeNo == "" {
 		s.writeAuditLog(ctx, p.Order.ID, "REFUND_NO_TRADE_NO", "admin", map[string]any{"detail": "skipped"})
-		return nil
+		return &payment.RefundResponse{RefundID: p.Order.OutTradeNo, Status: payment.ProviderStatusSuccess}, nil
 	}
 
 	// Use the exact provider instance that created this order, not a random one
 	// from the registry. Each instance has its own merchant credentials.
 	prov, err := s.getRefundProvider(ctx, p.Order)
 	if err != nil {
-		return fmt.Errorf("get refund provider: %w", err)
+		return nil, fmt.Errorf("get refund provider: %w", err)
 	}
 	if err := validateProviderSnapshotMetadata(p.Order, prov.ProviderKey(), providerMerchantIdentityMetadata(prov)); err != nil {
 		s.writeAuditLog(ctx, p.Order.ID, "REFUND_PROVIDER_METADATA_MISMATCH", "admin", map[string]any{
 			"detail": err.Error(),
 		})
-		return err
+		return nil, err
 	}
 	resp, err := prov.Refund(ctx, payment.RefundRequest{
 		TradeNo: p.Order.PaymentTradeNo,
@@ -347,9 +354,12 @@ func (s *PaymentService) gwRefund(ctx context.Context, p *RefundPlan) error {
 		Reason:  p.Reason,
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return validateRefundProviderResponse(resp)
+	if err := validateRefundProviderResponse(resp); err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
 func formatGatewayRefundAmount(amount float64, order *dbent.PaymentOrder) string {
@@ -408,6 +418,43 @@ func (s *PaymentService) markRefundOk(ctx context.Context, p *RefundPlan) (*Refu
 	}
 	s.writeAuditLog(ctx, p.OrderID, "REFUND_SUCCESS", "admin", map[string]any{"refundAmount": p.RefundAmount, "reason": p.Reason, "balanceDeducted": p.BalanceToDeduct, "force": p.Force})
 	return &RefundResult{Success: true, BalanceDeducted: p.BalanceToDeduct, SubDaysDeducted: p.SubDaysToDeduct}, nil
+}
+
+func (s *PaymentService) markRefundPending(ctx context.Context, p *RefundPlan, resp *payment.RefundResponse) (*RefundResult, error) {
+	_, err := s.entClient.PaymentOrder.UpdateOneID(p.OrderID).
+		SetStatus(OrderStatusRefunding).
+		ClearFailedAt().
+		ClearFailedReason().
+		Save(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("mark refund pending: %w", err)
+	}
+	refundID := ""
+	if resp != nil {
+		refundID = resp.RefundID
+	}
+	s.writeAuditLog(ctx, p.OrderID, "REFUND_PENDING", "admin", map[string]any{
+		"refundAmount":    p.RefundAmount,
+		"reason":          p.Reason,
+		"refundID":        refundID,
+		"balanceDeducted": p.BalanceToDeduct,
+		"subDaysDeducted": p.SubDaysToDeduct,
+	})
+	return &RefundResult{
+		Success:         true,
+		Warning:         "refund is pending upstream confirmation",
+		BalanceDeducted: p.BalanceToDeduct,
+		SubDaysDeducted: p.SubDaysToDeduct,
+	}, nil
+}
+
+func refundRequiresFullAmount(providerKey string) bool {
+	switch strings.TrimSpace(providerKey) {
+	case payment.TypeXunhuPay:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *PaymentService) RollbackRefund(ctx context.Context, p *RefundPlan, gErr error) bool {

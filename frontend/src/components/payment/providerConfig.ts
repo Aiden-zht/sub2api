@@ -39,6 +39,15 @@ export const PROVIDER_SUPPORTED_TYPES: Record<string, string[]> = {
   airwallex: ['airwallex'],
 }
 
+export const PROVIDER_REFUND_SUPPORTED: Record<string, boolean> = {
+  easypay: true,
+  xunhupay: true,
+  alipay: true,
+  wxpay: true,
+  stripe: true,
+  airwallex: true,
+}
+
 export function isProviderEnabledForPaymentTypes(providerKey: string, enabledPaymentTypes: readonly string[]): boolean {
   const enabled = new Set(enabledPaymentTypes)
   if (enabled.has(providerKey)) return true
@@ -50,6 +59,10 @@ export function isProviderEnabledForPaymentTypes(providerKey: string, enabledPay
   }
 
   return false
+}
+
+export function providerSupportsRefund(providerKey: string): boolean {
+  return PROVIDER_REFUND_SUPPORTED[providerKey] !== false
 }
 
 /** Available payment modes for EasyPay providers. */

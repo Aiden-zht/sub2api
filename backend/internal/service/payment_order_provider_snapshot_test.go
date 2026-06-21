@@ -164,6 +164,23 @@ func TestBuildPaymentOrderProviderSnapshot_IncludesEasyPayMerchantIdentity(t *te
 	require.NotContains(t, snapshot, "pkey")
 }
 
+func TestBuildPaymentOrderProviderSnapshot_IncludesXunhuPayMerchantIdentity(t *testing.T) {
+	t.Parallel()
+
+	snapshot := buildPaymentOrderProviderSnapshot(&payment.InstanceSelection{
+		InstanceID:  "67",
+		ProviderKey: payment.TypeXunhuPay,
+		Config: map[string]string{
+			"appId":     "xunhu-app-67",
+			"appSecret": "secret",
+		},
+		PaymentMode: "qrcode",
+	}, CreateOrderRequest{PaymentType: payment.TypeWxpay})
+
+	require.Equal(t, "xunhu-app-67", snapshot["merchant_app_id"])
+	require.NotContains(t, snapshot, "appSecret")
+}
+
 func TestBuildPaymentOrderProviderSnapshot_IncludesProviderCurrency(t *testing.T) {
 	t.Parallel()
 

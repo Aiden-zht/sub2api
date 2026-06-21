@@ -367,6 +367,23 @@ func TestValidateProviderNotificationMetadataRejectsEasyPaySnapshotMismatch(t *t
 	assert.ErrorContains(t, err, "easypay pid mismatch")
 }
 
+func TestValidateProviderNotificationMetadataRejectsXunhuPaySnapshotMismatch(t *testing.T) {
+	t.Parallel()
+
+	order := &dbent.PaymentOrder{
+		PaymentType: payment.TypeWxpay,
+		ProviderSnapshot: map[string]any{
+			"schema_version":  2,
+			"merchant_app_id": "xunhu-app-expected",
+		},
+	}
+
+	err := validateProviderNotificationMetadata(order, payment.TypeXunhuPay, map[string]string{
+		"appid": "xunhu-app-other",
+	})
+	assert.ErrorContains(t, err, "xunhupay appid mismatch")
+}
+
 func TestValidateProviderNotificationMetadataRejectsAirwallexSnapshotMismatch(t *testing.T) {
 	t.Parallel()
 

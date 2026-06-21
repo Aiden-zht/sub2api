@@ -47,9 +47,9 @@ func TestXunhuPayCreatePaymentParsesHostedURLAndQRCode(t *testing.T) {
 		}
 		received = r.PostForm
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"errcode":  0,
-			"errmsg":   "success",
-			"hash":     "xhp_hash_1",
+			"errcode":    0,
+			"errmsg":     "success",
+			"hash":       "xhp_hash_1",
 			"url":        "https://pay.example/mobile-checkout",
 			"url_qrcode": "https://pay.example/pc-qrcode.png",
 		})
@@ -136,6 +136,40 @@ func TestXunhuPayCreatePaymentDoesNotUseMobileURLAsQRCode(t *testing.T) {
 	}
 	if resp.QRCode != "" {
 		t.Fatalf("QRCode = %q, want empty when url_qrcode is absent", resp.QRCode)
+	}
+}
+
+func TestXunhuPayCreatePaymentRejectsMissingErrCode(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"errmsg": "success",
+			"url":    "https://pay.example/mobile-only",
+		})
+	}))
+	defer server.Close()
+
+	provider, err := NewXunhuPay("inst-1", map[string]string{
+		"appId":     "app_1001",
+		"appSecret": "secret",
+		"apiBase":   server.URL,
+	})
+	if err != nil {
+		t.Fatalf("NewXunhuPay: %v", err)
+	}
+
+	_, err = provider.CreatePayment(context.Background(), payment.CreatePaymentRequest{
+		OrderID:     "ORDER125",
+		Amount:      "10.00",
+		PaymentType: payment.TypeWxpay,
+		Subject:     "Test Product",
+		NotifyURL:   "https://merchant.example/notify",
+		ReturnURL:   "https://merchant.example/return",
+		ClientIP:    "127.0.0.1",
+	})
+	if err == nil || !strings.Contains(err.Error(), "missing errcode") {
+		t.Fatalf("CreatePayment err = %v, want missing errcode", err)
 	}
 }
 
@@ -237,5 +271,94 @@ func TestXunhuPayQueryOrderMapsPaidStatus(t *testing.T) {
 	}
 	if received.Get("trade_order_id") != "" {
 		t.Fatalf("trade_order_id should not be sent for query; form=%v", received)
+	}
+}
+
+func TestXunhuPayQueryOrderRejectsMissingErrCode(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{
+				"out_trade_order": "ORDER123",
+				"total_amount":    "10.00",
+				"status":          "OD",
+			},
+		})
+	}))
+	defer server.Close()
+
+	provider, err := NewXunhuPay("inst-1", map[string]string{
+		"appId":     "app_1001",
+		"appSecret": "secret",
+		"apiBase":   server.URL,
+	})
+	if err != nil {
+		t.Fatalf("NewXunhuPay: %v", err)
+	}
+
+	_, err = provider.QueryOrder(context.Background(), "ORDER123")
+	if err == nil || !strings.Contains(err.Error(), "missing errcode") {
+		t.Fatalf("QueryOrder err = %v, want missing errcode", err)
+	}
+}
+
+func TestXunhuPayRefundUsesTradeOrderIDAndMapsPendingStatus(t *testing.T) {
+	t.Parallel()
+
+	var received url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/payment/refund.html" {
+			t.Fatalf("path = %q, want /payment/refund.html", r.URL.Path)
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parse form: %v", err)
+		}
+		received = r.PostForm
+		payload := map[string]string{
+			"trade_order_id": "ORDER123",
+			"transaction_id": "XHP_TXN_1",
+			"out_refund_no":  "REFUND_123",
+			"refund_fee":     "10.00",
+			"reason":         "customer request",
+			"refund_status":  "RD",
+			"errcode":        "0",
+			"errmsg":         "",
+		}
+		payload["hash"] = xunhuPaySign(payload, "secret")
+		_ = json.NewEncoder(w).Encode(payload)
+	}))
+	defer server.Close()
+
+	provider, err := NewXunhuPay("inst-1", map[string]string{
+		"appId":     "app_1001",
+		"appSecret": "secret",
+		"apiBase":   server.URL,
+	})
+	if err != nil {
+		t.Fatalf("NewXunhuPay: %v", err)
+	}
+
+	resp, err := provider.Refund(context.Background(), payment.RefundRequest{
+		OrderID: "ORDER123",
+		Reason:  "customer request",
+	})
+	if err != nil {
+		t.Fatalf("Refund: %v", err)
+	}
+	if resp.RefundID != "REFUND_123" {
+		t.Fatalf("RefundID = %q", resp.RefundID)
+	}
+	if resp.Status != payment.ProviderStatusPending {
+		t.Fatalf("Status = %q, want pending", resp.Status)
+	}
+	if received.Get("trade_order_id") != "ORDER123" {
+		t.Fatalf("trade_order_id = %q, want ORDER123", received.Get("trade_order_id"))
+	}
+	if received.Get("open_order_id") != "" {
+		t.Fatalf("open_order_id should not be sent; form=%v", received)
+	}
+	if received.Get("hash") == "" {
+		t.Fatalf("request form missing hash signature: %v", received)
 	}
 }

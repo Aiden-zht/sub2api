@@ -22,6 +22,9 @@ const (
 	xunhuPayHTTPTimeout     = 10 * time.Second
 	maxXunhuPayResponseSize = 1 << 20
 	xunhuPayStatusPaid      = "OD"
+	xunhuPayStatusRefunded  = "CD"
+	xunhuPayStatusRefunding = "RD"
+	xunhuPayStatusRefundErr = "UD"
 )
 
 // XunhuPay implements payment.Provider for XunhuPay / HuPiJiao.
@@ -104,7 +107,11 @@ func (x *XunhuPay) CreatePayment(ctx context.Context, req payment.CreatePaymentR
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, fmt.Errorf("xunhupay parse: %w", err)
 	}
-	if !xunhuPayCodeIsSuccess(resp.ErrCode) {
+	code, ok := xunhuPayErrCode(resp.ErrCode)
+	if !ok {
+		return nil, fmt.Errorf("xunhupay parse: missing errcode")
+	}
+	if code != 0 {
 		msg := strings.TrimSpace(resp.ErrMsg)
 		if msg == "" {
 			msg = summarizeGatewayResponse(body)
@@ -112,6 +119,9 @@ func (x *XunhuPay) CreatePayment(ctx context.Context, req payment.CreatePaymentR
 		return nil, fmt.Errorf("xunhupay error: %s", msg)
 	}
 	qrCode := firstNonEmpty(resp.URLQRCode, resp.CodeURL, resp.QRCode)
+	if strings.TrimSpace(resp.URL) == "" && strings.TrimSpace(qrCode) == "" {
+		return nil, fmt.Errorf("xunhupay create missing pay_url and qr_code")
+	}
 	return &payment.CreatePaymentResponse{TradeNo: req.OrderID, PayURL: resp.URL, QRCode: qrCode}, nil
 }
 
@@ -151,7 +161,11 @@ func (x *XunhuPay) QueryOrder(ctx context.Context, tradeNo string) (*payment.Que
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, fmt.Errorf("xunhupay parse query: %w", err)
 	}
-	if !xunhuPayCodeIsSuccess(resp.ErrCode) {
+	code, ok := xunhuPayErrCode(resp.ErrCode)
+	if !ok {
+		return nil, fmt.Errorf("xunhupay parse query: missing errcode")
+	}
+	if code != 0 {
 		msg := strings.TrimSpace(resp.ErrMsg)
 		if msg == "" {
 			msg = summarizeGatewayResponse(body)
@@ -160,12 +174,21 @@ func (x *XunhuPay) QueryOrder(ctx context.Context, tradeNo string) (*payment.Que
 	}
 	tradeOrderID := firstNonEmpty(resp.Data.TradeOrderID, resp.Data.OutTradeOrder, resp.TradeOrderID, resp.OutTradeOrder)
 	transactionID := firstNonEmpty(resp.Data.TransactionID, resp.TransactionID, resp.Data.OpenOrderID, resp.OpenOrderID)
-	totalAmount := firstNonEmpty(resp.Data.TotalFee, resp.Data.TotalAmount, resp.TotalFee, resp.TotalAmount)
+	totalAmount := firstNonEmpty(resp.Data.TotalAmount, resp.Data.TotalFee, resp.TotalAmount, resp.TotalFee)
 	status := firstNonEmpty(resp.Data.Status, resp.Status)
-	amount, _ := strconv.ParseFloat(totalAmount, 64)
+	if strings.TrimSpace(status) == "" {
+		return nil, fmt.Errorf("xunhupay query missing status")
+	}
+	if strings.TrimSpace(totalAmount) == "" {
+		return nil, fmt.Errorf("xunhupay query missing total_amount")
+	}
+	amount, err := strconv.ParseFloat(totalAmount, 64)
+	if err != nil {
+		return nil, fmt.Errorf("xunhupay query invalid total_amount: %w", err)
+	}
 	return &payment.QueryOrderResponse{
 		TradeNo:  firstNonEmpty(transactionID, tradeOrderID, tradeNo),
-		Status:   xunhuPayProviderStatus(status, false),
+		Status:   xunhuPayOrderStatus(status),
 		Amount:   amount,
 		Metadata: x.MerchantIdentityMetadata(),
 	}, nil
@@ -202,14 +225,78 @@ func (x *XunhuPay) VerifyNotification(_ context.Context, rawBody string, _ map[s
 		TradeNo:  firstNonEmpty(params["transaction_id"], params["hash"]),
 		OrderID:  firstNonEmpty(params["trade_order_id"], params["out_trade_no"]),
 		Amount:   amount,
-		Status:   xunhuPayProviderStatus(params["status"], true),
+		Status:   xunhuPayNotificationStatus(params["status"]),
 		RawData:  rawBody,
 		Metadata: metadata,
 	}, nil
 }
 
-func (x *XunhuPay) Refund(context.Context, payment.RefundRequest) (*payment.RefundResponse, error) {
-	return nil, fmt.Errorf("xunhupay refund is not implemented")
+func (x *XunhuPay) Refund(ctx context.Context, req payment.RefundRequest) (*payment.RefundResponse, error) {
+	orderID := strings.TrimSpace(req.OrderID)
+	if orderID == "" {
+		return nil, fmt.Errorf("xunhupay refund missing trade_order_id")
+	}
+	params := map[string]string{
+		"appid":          x.config["appId"],
+		"trade_order_id": orderID,
+		"reason":         strings.TrimSpace(req.Reason),
+		"nonce_str":      strconv.FormatInt(time.Now().UnixNano(), 36),
+		"time":           strconv.FormatInt(time.Now().Unix(), 10),
+	}
+	params["hash"] = xunhuPaySign(params, x.config["appSecret"])
+
+	body, err := x.post(ctx, x.endpoint("/payment/refund.html"), params)
+	if err != nil {
+		return nil, fmt.Errorf("xunhupay refund: %w", err)
+	}
+	var resp struct {
+		TradeOrderID  string `json:"trade_order_id"`
+		TransactionID string `json:"transaction_id"`
+		OutRefundNo   string `json:"out_refund_no"`
+		RefundFee     string `json:"refund_fee"`
+		Reason        string `json:"reason"`
+		RefundStatus  string `json:"refund_status"`
+		ErrCode       any    `json:"errcode"`
+		ErrMsg        string `json:"errmsg"`
+		Hash          string `json:"hash"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, fmt.Errorf("xunhupay parse refund: %w", err)
+	}
+	code, ok := xunhuPayErrCode(resp.ErrCode)
+	if !ok {
+		return nil, fmt.Errorf("xunhupay parse refund: missing errcode")
+	}
+	if code != 0 {
+		msg := strings.TrimSpace(resp.ErrMsg)
+		if msg == "" {
+			msg = summarizeGatewayResponse(body)
+		}
+		return nil, fmt.Errorf("xunhupay refund failed: %s", msg)
+	}
+	if strings.TrimSpace(resp.RefundStatus) == "" {
+		return nil, fmt.Errorf("xunhupay refund missing refund_status")
+	}
+	if strings.TrimSpace(resp.Hash) == "" {
+		return nil, fmt.Errorf("xunhupay refund missing hash")
+	}
+	responseParams := map[string]string{
+		"trade_order_id": resp.TradeOrderID,
+		"transaction_id": resp.TransactionID,
+		"out_refund_no":  resp.OutRefundNo,
+		"refund_fee":     resp.RefundFee,
+		"reason":         resp.Reason,
+		"refund_status":  resp.RefundStatus,
+		"errcode":        strconv.Itoa(code),
+		"errmsg":         resp.ErrMsg,
+	}
+	if !xunhuPayVerifySign(responseParams, x.config["appSecret"], resp.Hash) {
+		return nil, fmt.Errorf("xunhupay refund invalid signature")
+	}
+	return &payment.RefundResponse{
+		RefundID: firstNonEmpty(resp.OutRefundNo, resp.TransactionID, resp.TradeOrderID, req.OrderID),
+		Status:   xunhuPayRefundStatus(resp.RefundStatus),
+	}, nil
 }
 
 func (x *XunhuPay) resolveURLs(req payment.CreatePaymentRequest) (string, string) {
@@ -278,7 +365,7 @@ func normalizeXunhuPayAPIBase(apiBase string) string {
 func trimXunhuPayEndpointPath(path string) string {
 	path = strings.TrimRight(strings.TrimSpace(path), "/")
 	lower := strings.ToLower(path)
-	for _, endpoint := range []string{"/payment/do.html", "/payment/query.html"} {
+	for _, endpoint := range []string{"/payment/do.html", "/payment/query.html", "/payment/refund.html"} {
 		if strings.HasSuffix(lower, endpoint) {
 			return strings.TrimRight(path[:len(path)-len(endpoint)], "/")
 		}
@@ -311,31 +398,62 @@ func xunhuPayVerifySign(params map[string]string, secret string, sign string) bo
 	return hmac.Equal([]byte(xunhuPaySign(params, secret)), []byte(sign))
 }
 
-func xunhuPayCodeIsSuccess(code any) bool {
+func xunhuPayErrCode(code any) (int, bool) {
 	switch v := code.(type) {
 	case float64:
-		return int(v) == 0
+		return int(v), true
+	case float32:
+		return int(v), true
+	case int:
+		return v, true
+	case int32:
+		return int(v), true
+	case int64:
+		return int(v), true
 	case string:
 		n, err := strconv.Atoi(strings.TrimSpace(v))
-		return err == nil && n == 0
-	case nil:
-		return true
+		return n, err == nil
 	default:
-		return false
+		return 0, false
 	}
 }
 
-func xunhuPayProviderStatus(status string, notification bool) string {
-	switch strings.ToLower(strings.TrimSpace(status)) {
-	case strings.ToLower(xunhuPayStatusPaid), "paid", "success", "succeeded":
-		if notification {
-			return payment.ProviderStatusSuccess
-		}
-		return payment.ProviderStatusPaid
-	case "failed", "fail", "closed", "cancelled", "canceled":
+func xunhuPayNotificationStatus(status string) string {
+	switch strings.ToUpper(strings.TrimSpace(status)) {
+	case xunhuPayStatusPaid, "PAID", "SUCCESS", "SUCCEEDED":
+		return payment.ProviderStatusSuccess
+	case xunhuPayStatusRefunded, xunhuPayStatusRefunding, xunhuPayStatusRefundErr, "FAILED", "FAIL", "CLOSED", "CANCELLED", "CANCELED":
 		return payment.ProviderStatusFailed
 	default:
 		return payment.ProviderStatusPending
+	}
+}
+
+func xunhuPayOrderStatus(status string) string {
+	switch strings.ToUpper(strings.TrimSpace(status)) {
+	case xunhuPayStatusPaid, "PAID", "SUCCESS", "SUCCEEDED":
+		return payment.ProviderStatusPaid
+	case xunhuPayStatusRefunded:
+		return payment.ProviderStatusRefunded
+	case xunhuPayStatusRefunding:
+		return payment.ProviderStatusPending
+	case xunhuPayStatusRefundErr, "FAILED", "FAIL", "CLOSED", "CANCELLED", "CANCELED":
+		return payment.ProviderStatusFailed
+	default:
+		return payment.ProviderStatusPending
+	}
+}
+
+func xunhuPayRefundStatus(status string) string {
+	switch strings.ToUpper(strings.TrimSpace(status)) {
+	case xunhuPayStatusRefunded:
+		return payment.ProviderStatusSuccess
+	case xunhuPayStatusRefunding, xunhuPayStatusPaid:
+		return payment.ProviderStatusPending
+	case xunhuPayStatusRefundErr, "FAILED", "FAIL", "CLOSED", "CANCELLED", "CANCELED":
+		return payment.ProviderStatusFailed
+	default:
+		return payment.ProviderStatusFailed
 	}
 }
 

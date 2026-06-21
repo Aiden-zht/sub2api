@@ -4,7 +4,14 @@ package service
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"sort"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -176,7 +183,7 @@ func TestGwRefundRejectsAlipayMerchantIdentitySnapshotMismatch(t *testing.T) {
 		loadBalancer: newWebhookProviderTestLoadBalancer(client),
 	}
 
-	err = svc.gwRefund(ctx, &RefundPlan{
+	_, err = svc.gwRefund(ctx, &RefundPlan{
 		OrderID:       order.ID,
 		Order:         order,
 		RefundAmount:  order.Amount,
@@ -207,4 +214,184 @@ func TestValidateRefundProviderResponseAcceptsPending(t *testing.T) {
 	require.NoError(t, validateRefundProviderResponse(&payment.RefundResponse{Status: payment.ProviderStatusSuccess}))
 	require.Error(t, validateRefundProviderResponse(&payment.RefundResponse{Status: payment.ProviderStatusFailed}))
 	require.Error(t, validateRefundProviderResponse(nil))
+}
+
+func TestPrepareRefundRejectsXunhuPayPartialRefund(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+
+	user, err := client.User.Create().
+		SetEmail("refund-xunhu-partial@example.com").
+		SetPasswordHash("hash").
+		SetUsername("refund-xunhu-partial-user").
+		Save(ctx)
+	require.NoError(t, err)
+
+	inst, err := client.PaymentProviderInstance.Create().
+		SetProviderKey(payment.TypeXunhuPay).
+		SetName("xunhu-refund-instance").
+		SetConfig(encryptWebhookProviderConfig(t, map[string]string{
+			"appId":     "xunhu-app-1",
+			"appSecret": "secret",
+			"apiBase":   "https://api.xunhupay.com",
+		})).
+		SetSupportedTypes("wxpay").
+		SetEnabled(true).
+		SetRefundEnabled(true).
+		Save(ctx)
+	require.NoError(t, err)
+
+	instID := strconv.FormatInt(inst.ID, 10)
+	order, err := client.PaymentOrder.Create().
+		SetUserID(user.ID).
+		SetUserEmail(user.Email).
+		SetUserName(user.Username).
+		SetAmount(100).
+		SetPayAmount(100).
+		SetFeeRate(0).
+		SetRechargeCode("REFUND-XUNHU-PARTIAL-ORDER").
+		SetOutTradeNo("sub2_refund_xunhu_partial_order").
+		SetPaymentType(payment.TypeWxpay).
+		SetPaymentTradeNo("trade-refund-xunhu-partial").
+		SetOrderType(payment.OrderTypeBalance).
+		SetStatus(OrderStatusCompleted).
+		SetExpiresAt(time.Now().Add(time.Hour)).
+		SetPaidAt(time.Now()).
+		SetClientIP("127.0.0.1").
+		SetSrcHost("api.example.com").
+		SetProviderInstanceID(instID).
+		SetProviderKey(payment.TypeXunhuPay).
+		SetProviderSnapshot(map[string]any{
+			"schema_version":       2,
+			"provider_instance_id": instID,
+			"provider_key":         payment.TypeXunhuPay,
+			"merchant_app_id":      "xunhu-app-1",
+		}).
+		Save(ctx)
+	require.NoError(t, err)
+
+	svc := &PaymentService{entClient: client}
+
+	plan, result, err := svc.PrepareRefund(ctx, order.ID, 50, "partial refund", false, false)
+	require.Nil(t, plan)
+	require.Nil(t, result)
+	require.Error(t, err)
+	require.Equal(t, "PARTIAL_REFUND_UNSUPPORTED", infraerrors.Reason(err))
+}
+
+func TestExecuteRefundKeepsPendingXunhuPayRefundInRefundingState(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/payment/refund.html", r.URL.Path)
+		require.NoError(t, r.ParseForm())
+		payload := map[string]string{
+			"trade_order_id": "sub2_refund_xunhu_pending_order",
+			"transaction_id": "txn_123",
+			"out_refund_no":  "refund_123",
+			"refund_fee":     "100.00",
+			"reason":         "pending refund",
+			"refund_status":  "RD",
+			"errcode":        "0",
+			"errmsg":         "",
+		}
+		payload["hash"] = xunhuHashForTest(payload, "secret")
+		require.NoError(t, json.NewEncoder(w).Encode(payload))
+	}))
+	defer server.Close()
+
+	user, err := client.User.Create().
+		SetEmail("refund-xunhu-pending@example.com").
+		SetPasswordHash("hash").
+		SetUsername("refund-xunhu-pending-user").
+		Save(ctx)
+	require.NoError(t, err)
+
+	inst, err := client.PaymentProviderInstance.Create().
+		SetProviderKey(payment.TypeXunhuPay).
+		SetName("xunhu-pending-instance").
+		SetConfig(encryptWebhookProviderConfig(t, map[string]string{
+			"appId":     "xunhu-app-2",
+			"appSecret": "secret",
+			"apiBase":   server.URL,
+		})).
+		SetSupportedTypes("wxpay").
+		SetEnabled(true).
+		SetRefundEnabled(true).
+		Save(ctx)
+	require.NoError(t, err)
+
+	instID := strconv.FormatInt(inst.ID, 10)
+	order, err := client.PaymentOrder.Create().
+		SetUserID(user.ID).
+		SetUserEmail(user.Email).
+		SetUserName(user.Username).
+		SetAmount(100).
+		SetPayAmount(100).
+		SetFeeRate(0).
+		SetRechargeCode("REFUND-XUNHU-PENDING-ORDER").
+		SetOutTradeNo("sub2_refund_xunhu_pending_order").
+		SetPaymentType(payment.TypeWxpay).
+		SetPaymentTradeNo("trade-refund-xunhu-pending").
+		SetOrderType(payment.OrderTypeBalance).
+		SetStatus(OrderStatusCompleted).
+		SetExpiresAt(time.Now().Add(time.Hour)).
+		SetPaidAt(time.Now()).
+		SetClientIP("127.0.0.1").
+		SetSrcHost("api.example.com").
+		SetProviderInstanceID(instID).
+		SetProviderKey(payment.TypeXunhuPay).
+		SetProviderSnapshot(map[string]any{
+			"schema_version":       2,
+			"provider_instance_id": instID,
+			"provider_key":         payment.TypeXunhuPay,
+			"merchant_app_id":      "xunhu-app-2",
+		}).
+		Save(ctx)
+	require.NoError(t, err)
+
+	svc := &PaymentService{
+		entClient:    client,
+		loadBalancer: newWebhookProviderTestLoadBalancer(client),
+	}
+
+	result, err := svc.ExecuteRefund(ctx, &RefundPlan{
+		OrderID:       order.ID,
+		Order:         order,
+		RefundAmount:  order.Amount,
+		GatewayAmount: order.Amount,
+		Reason:        "pending refund",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.True(t, result.Success)
+	require.Contains(t, result.Warning, "pending")
+
+	reloaded, err := client.PaymentOrder.Get(ctx, order.ID)
+	require.NoError(t, err)
+	require.Equal(t, OrderStatusRefunding, reloaded.Status)
+}
+
+func xunhuHashForTest(values map[string]string, secret string) string {
+	keys := make([]string, 0, len(values))
+	for key, value := range values {
+		if strings.TrimSpace(value) == "" || key == "hash" || key == "sign" || key == "sign_type" {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var builder strings.Builder
+	for index, key := range keys {
+		if index > 0 {
+			builder.WriteByte('&')
+		}
+		builder.WriteString(key)
+		builder.WriteByte('=')
+		builder.WriteString(values[key])
+	}
+	builder.WriteString(secret)
+	sum := md5.Sum([]byte(builder.String()))
+	return hex.EncodeToString(sum[:])
 }
