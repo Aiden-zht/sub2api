@@ -1,0 +1,42 @@
+:root {
+  --s2a-theme-brand: var(--s2a-brand-color, #2563eb);
+  --s2a-theme-surface: var(--s2a-surface-color, #f8fafc);
+  --s2a-theme-accent: var(--s2a-accent-color, #0f766e);
+}
+
+body {
+  background:
+    linear-gradient(180deg, rgba(37, 99, 235, 0.05), rgba(15, 118, 110, 0.04)),
+    var(--s2a-theme-surface);
+}
+
+.admin-layout,
+.app-layout,
+.main-layout {
+  background-color: transparent;
+}
+
+.btn-primary,
+button[type='submit'] {
+  border-color: var(--s2a-theme-brand);
+  background-color: var(--s2a-theme-brand);
+}
+
+a,
+.text-primary,
+.nav-link.router-link-active {
+  color: var(--s2a-theme-brand);
+}
+
+.card,
+.panel,
+.settings-card {
+  border-color: rgba(15, 118, 110, 0.18);
+}
+
+.badge,
+.tag,
+.status-badge {
+  border-color: rgba(15, 118, 110, 0.24);
+  color: var(--s2a-theme-accent);
+}

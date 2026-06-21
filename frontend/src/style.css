@@ -3,6 +3,25 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --s2a-color-primary-500: #14b8a6;
+    --s2a-color-primary-600: #0d9488;
+    --s2a-color-primary-700: #0f766e;
+    --s2a-bg-page: #f9fafb;
+    --s2a-bg-card: #ffffff;
+    --s2a-text-primary: #111827;
+    --s2a-border-subtle: #e5e7eb;
+    --s2a-radius-card: 1rem;
+    --s2a-shadow-card: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.06);
+  }
+
+  .dark {
+    --s2a-bg-page: #020617;
+    --s2a-bg-card: rgba(30, 41, 59, 0.5);
+    --s2a-text-primary: #f8fafc;
+    --s2a-border-subtle: rgba(51, 65, 85, 0.5);
+  }
+
   * {
     @apply border-gray-200 dark:border-dark-700;
   }
@@ -14,6 +33,8 @@
   body {
     @apply bg-gray-50 text-gray-900 dark:bg-dark-950 dark:text-gray-100;
     @apply min-h-screen;
+    background: var(--s2a-bg-page);
+    color: var(--s2a-text-primary);
   }
 
   /* 自定义滚动条 - 仅针对 Firefox，避免 Chrome 取消 webkit 的全局定制 */
@@ -79,6 +100,7 @@
     @apply text-white shadow-md shadow-primary-500/25;
     @apply hover:from-primary-600 hover:to-primary-700 hover:shadow-lg hover:shadow-primary-500/30;
     @apply dark:shadow-primary-500/20;
+    background-image: linear-gradient(135deg, var(--s2a-color-primary-500), var(--s2a-color-primary-600));
   }
 
   .btn-secondary {
@@ -168,6 +190,7 @@
     @apply transition-all duration-200;
     @apply focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/30;
     @apply disabled:cursor-not-allowed disabled:bg-gray-100 dark:disabled:bg-dark-900;
+    border-color: var(--s2a-border-subtle);
   }
 
   .input-error {
@@ -218,6 +241,10 @@
     @apply border border-gray-100 dark:border-dark-700/50;
     @apply shadow-card;
     @apply transition-all duration-300;
+    background: var(--s2a-bg-card);
+    border-color: var(--s2a-border-subtle);
+    border-radius: var(--s2a-radius-card);
+    box-shadow: var(--s2a-shadow-card);
   }
 
   .card-hover {

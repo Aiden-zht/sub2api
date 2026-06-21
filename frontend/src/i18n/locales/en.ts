@@ -411,6 +411,7 @@ export default {
     paymentDashboard: 'Payment Dashboard',
     paymentConfig: 'Payment Config',
     paymentPlans: 'Plans',
+    themes: 'Themes',
     channelManagement: 'Channels',
     channelPricing: 'Channel Pricing',
     channelMonitor: 'Channel Monitor',
@@ -1425,6 +1426,31 @@ export default {
 
   // Admin
   admin: {
+    themes: {
+      title: 'Theme Management',
+      description: 'Install, enable, and remove third-party theme packages. Theme packages may only contain CSS, images, and fonts; scripts are not executed.',
+      loadFailed: 'Failed to load themes',
+      uploadSuccess: 'Theme package installed',
+      uploadFailed: 'Failed to install theme package',
+      uploading: 'Uploading...',
+      upload: 'Upload Theme',
+      actionFailed: 'Theme action failed',
+      enableSuccess: 'Theme enabled',
+      disableSuccess: 'Theme disabled',
+      deleteSuccess: 'Theme deleted',
+      deleteConfirm: 'Delete theme "{name}"?',
+      empty: 'No themes installed',
+      emptyHint: 'Upload a .zip theme package, then enable it here.',
+      theme: 'Theme',
+      version: 'Version',
+      capabilities: 'Capabilities',
+      status: 'Status',
+      enabled: 'Enabled',
+      disabled: 'Disabled',
+      enable: 'Enable',
+      disable: 'Disable',
+    },
+
     // Dashboard
     dashboard: {
       title: 'Admin Dashboard',

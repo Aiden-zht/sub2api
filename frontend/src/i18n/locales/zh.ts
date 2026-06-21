@@ -411,6 +411,7 @@ export default {
     paymentDashboard: '支付概览',
     paymentConfig: '支付配置',
     paymentPlans: '订阅套餐',
+    themes: '主题管理',
     channelManagement: '渠道管理',
     channelPricing: '渠道定价',
     channelMonitor: '渠道监控',
@@ -1429,6 +1430,31 @@ export default {
 
   // Admin
   admin: {
+    themes: {
+      title: '主题管理',
+      description: '安装、启用和移除第三方主题包。主题包仅允许 CSS、图片和字体资源，不执行脚本。',
+      loadFailed: '主题列表加载失败',
+      uploadSuccess: '主题包安装成功',
+      uploadFailed: '主题包安装失败',
+      uploading: '上传中...',
+      upload: '上传主题包',
+      actionFailed: '主题操作失败',
+      enableSuccess: '主题已启用',
+      disableSuccess: '主题已停用',
+      deleteSuccess: '主题已删除',
+      deleteConfirm: '确定删除主题「{name}」吗？',
+      empty: '暂无已安装主题',
+      emptyHint: '上传 .zip 主题包后，可在这里启用它。',
+      theme: '主题',
+      version: '版本',
+      capabilities: '能力',
+      status: '状态',
+      enabled: '已启用',
+      disabled: '未启用',
+      enable: '启用',
+      disable: '停用',
+    },
+
     // Dashboard
     dashboard: {
       title: '管理控制台',

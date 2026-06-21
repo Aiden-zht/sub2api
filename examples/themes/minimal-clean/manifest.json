@@ -1,0 +1,19 @@
+{
+  "id": "minimal-clean",
+  "name": "Minimal Clean",
+  "version": "1.0.0",
+  "sub2apiThemeApi": "1",
+  "author": "Sub2API",
+  "description": "A minimal static theme package for validating upload, activation, rollback, and third-party theme authoring.",
+  "entry": "theme.css",
+  "tokens": {
+    "brandColor": "#2563eb",
+    "surfaceColor": "#f8fafc",
+    "accentColor": "#0f766e"
+  },
+  "capabilities": [
+    "css",
+    "tokens",
+    "static-assets"
+  ]
+}

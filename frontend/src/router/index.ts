@@ -550,6 +550,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/themes',
+    name: 'AdminThemes',
+    component: () => import('@/views/admin/ThemesView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Theme Management',
+      titleKey: 'admin.themes.title',
+      descriptionKey: 'admin.themes.description'
+    }
+  },
+  {
     path: '/admin/risk-control',
     name: 'AdminRiskControl',
     component: () => import('@/views/admin/RiskControlView.vue'),
