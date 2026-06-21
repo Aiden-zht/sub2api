@@ -99,7 +99,7 @@ import Icon from '@/components/icons/Icon.vue'
 import ProviderCard from './ProviderCard.vue'
 import type { ProviderInstance } from '@/types/payment'
 import type { TypeOption } from './providerConfig'
-import { getAvailableTypes } from './providerConfig'
+import { getAvailableTypes, isProviderEnabledForPaymentTypes } from './providerConfig'
 
 const props = defineProps<{
   providers: ProviderInstance[]
@@ -137,7 +137,7 @@ function onDragEnd() {
 }
 
 function isEnabled(providerKey: string): boolean {
-  return props.enabledPaymentTypes.includes(providerKey)
+  return isProviderEnabledForPaymentTypes(providerKey, props.enabledPaymentTypes)
 }
 
 function getTypes(providerKey: string): TypeOption[] {

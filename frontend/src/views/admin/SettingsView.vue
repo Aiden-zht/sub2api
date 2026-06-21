@@ -6399,6 +6399,48 @@
                     </a>
                   </p>
                 </div>
+                <div
+                  v-if="
+                    isPaymentTypeEnabled('alipay') ||
+                    isPaymentTypeEnabled('wxpay')
+                  "
+                  class="grid grid-cols-1 gap-3 rounded-lg border border-gray-100 bg-gray-50 p-3 dark:border-dark-700 dark:bg-dark-800/50 md:grid-cols-2"
+                >
+                  <div v-if="isPaymentTypeEnabled('alipay')">
+                    <label class="input-label">
+                      {{
+                        t("admin.settings.paymentVisibleMethods.methodLabel", {
+                          title: t("payment.methods.alipay"),
+                        })
+                      }}
+                    </label>
+                    <Select
+                      v-model="form.payment_visible_method_alipay_source"
+                      :options="paymentVisibleAlipaySourceOptions"
+                      class="w-full"
+                    />
+                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.paymentVisibleMethods.sourceHint") }}
+                    </p>
+                  </div>
+                  <div v-if="isPaymentTypeEnabled('wxpay')">
+                    <label class="input-label">
+                      {{
+                        t("admin.settings.paymentVisibleMethods.methodLabel", {
+                          title: t("payment.methods.wxpay"),
+                        })
+                      }}
+                    </label>
+                    <Select
+                      v-model="form.payment_visible_method_wxpay_source"
+                      :options="paymentVisibleWxpaySourceOptions"
+                      class="w-full"
+                    />
+                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.paymentVisibleMethods.sourceHint") }}
+                    </p>
+                  </div>
+                </div>
                 <!-- Row 5: Help image + text -->
                 <div class="grid grid-cols-2 gap-3">
                   <div>
@@ -6960,6 +7002,8 @@ import {
   defaultWeChatConnectScopesForMode,
   deriveWeChatConnectStoredMode,
   normalizeDefaultSubscriptionSettings,
+  getPaymentVisibleMethodSourceOptions,
+  normalizePaymentVisibleMethodSource,
   resolveWeChatConnectModeCapabilities,
 } from "@/api/admin/settings";
 import type {
@@ -7001,6 +7045,7 @@ import { extractApiErrorMessage, extractI18nErrorMessage } from "@/utils/apiErro
 import { useAppStore } from "@/stores";
 import { useAdminSettingsStore } from "@/stores/adminSettings";
 import { normalizeVisibleMethod } from "@/components/payment/paymentFlow";
+import { isProviderEnabledForPaymentTypes } from "@/components/payment/providerConfig";
 import {
   isRegistrationEmailSuffixDomainValid,
   normalizeRegistrationEmailSuffixDomain,
@@ -7684,6 +7729,10 @@ const form = reactive<SettingsForm>({
   payment_balance_recharge_multiplier: 1,
   payment_recharge_fee_rate: 0,
   payment_enabled_types: [],
+  payment_visible_method_alipay_source: "",
+  payment_visible_method_wxpay_source: "",
+  payment_visible_method_alipay_enabled: false,
+  payment_visible_method_wxpay_enabled: false,
   payment_help_image_url: "",
   payment_help_text: "",
   payment_product_name_prefix: "",
@@ -8484,6 +8533,16 @@ async function loadSettings() {
     form.default_subscriptions = normalizeDefaultSubscriptionSettings(
       settings.default_subscriptions,
     );
+    form.payment_visible_method_alipay_source =
+      normalizePaymentVisibleMethodSource(
+        "alipay",
+        settings.payment_visible_method_alipay_source,
+      );
+    form.payment_visible_method_wxpay_source =
+      normalizePaymentVisibleMethodSource(
+        "wxpay",
+        settings.payment_visible_method_wxpay_source,
+      );
     registrationEmailSuffixWhitelistTags.value =
       normalizeRegistrationEmailSuffixDomains(
         settings.registration_email_suffix_whitelist,
@@ -8984,6 +9043,16 @@ async function saveSettings() {
         Number(form.payment_balance_recharge_multiplier) || 1,
       payment_recharge_fee_rate: Number(form.payment_recharge_fee_rate) || 0,
       payment_enabled_types: form.payment_enabled_types,
+      payment_visible_method_alipay_source:
+        form.payment_visible_method_alipay_source,
+      payment_visible_method_wxpay_source:
+        form.payment_visible_method_wxpay_source,
+      payment_visible_method_alipay_enabled:
+        isPaymentTypeEnabled("alipay") &&
+        !!form.payment_visible_method_alipay_source,
+      payment_visible_method_wxpay_enabled:
+        isPaymentTypeEnabled("wxpay") &&
+        !!form.payment_visible_method_wxpay_source,
       payment_load_balance_strategy: form.payment_load_balance_strategy,
       payment_product_name_prefix: form.payment_product_name_prefix,
       payment_product_name_suffix: form.payment_product_name_suffix,
@@ -9585,6 +9654,7 @@ async function saveBetaPolicySettings() {
 
 const allPaymentTypes = computed(() => [
   { value: "easypay", label: t("payment.methods.easypay") },
+  { value: "xunhupay", label: t("payment.methods.xunhupay") },
   { value: "alipay", label: t("payment.methods.alipay") },
   { value: "wxpay", label: t("payment.methods.wxpay") },
   { value: "stripe", label: t("payment.methods.stripe") },
@@ -9599,11 +9669,31 @@ const hasAnyPaymentTypeEnabled = computed(
   () => form.payment_enabled_types.length > 0,
 );
 
+const paymentVisibleAlipaySourceOptions = computed(() =>
+  getPaymentVisibleMethodSourceOptions("alipay").map((option) => ({
+    value: option.value,
+    label: localText(option.labelZh, option.labelEn),
+  })),
+);
+
+const paymentVisibleWxpaySourceOptions = computed(() =>
+  getPaymentVisibleMethodSourceOptions("wxpay").map((option) => ({
+    value: option.value,
+    label: localText(option.labelZh, option.labelEn),
+  })),
+);
+
 function togglePaymentType(type: string) {
   if (form.payment_enabled_types.includes(type)) {
     form.payment_enabled_types = form.payment_enabled_types.filter(
       (t) => t !== type,
     );
+    if (type === "alipay") {
+      form.payment_visible_method_alipay_source = "";
+    }
+    if (type === "wxpay") {
+      form.payment_visible_method_wxpay_source = "";
+    }
     // Disable all provider instances matching this type
     disableProvidersByType(type);
   } else {
@@ -9642,6 +9732,7 @@ const providerDialogRef = ref<InstanceType<
 
 const providerKeyOptions = computed(() => [
   { value: "easypay", label: t("admin.settings.payment.providerEasypay") },
+  { value: "xunhupay", label: t("admin.settings.payment.providerXunhuPay") },
   { value: "alipay", label: t("admin.settings.payment.providerAlipay") },
   { value: "wxpay", label: t("admin.settings.payment.providerWxpay") },
   { value: "stripe", label: t("admin.settings.payment.providerStripe") },
@@ -9650,7 +9741,9 @@ const providerKeyOptions = computed(() => [
 
 const enabledProviderKeyOptions = computed(() => {
   const enabled = form.payment_enabled_types;
-  return providerKeyOptions.value.filter((opt) => enabled.includes(opt.value));
+  return providerKeyOptions.value.filter((opt) =>
+    isProviderEnabledForPaymentTypes(opt.value, enabled),
+  );
 });
 
 const loadBalanceOptions = computed(() => [
@@ -9727,7 +9820,7 @@ function getProviderVisibleMethods(
         }
       });
     }
-  } else if (provider.provider_key === "easypay") {
+  } else if (provider.provider_key === "easypay" || provider.provider_key === "xunhupay") {
     supportedTypes.forEach(addMethod);
   }
 

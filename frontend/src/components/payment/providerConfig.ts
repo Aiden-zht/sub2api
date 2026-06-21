@@ -32,10 +32,24 @@ export interface CallbackPaths {
 /** Maps provider key → available payment types. */
 export const PROVIDER_SUPPORTED_TYPES: Record<string, string[]> = {
   easypay: ['alipay', 'wxpay'],
+  xunhupay: ['alipay', 'wxpay'],
   alipay: ['alipay'],
   wxpay: ['wxpay'],
   stripe: ['card', 'alipay', 'wxpay', 'link'],
   airwallex: ['airwallex'],
+}
+
+export function isProviderEnabledForPaymentTypes(providerKey: string, enabledPaymentTypes: readonly string[]): boolean {
+  const enabled = new Set(enabledPaymentTypes)
+  if (enabled.has(providerKey)) return true
+
+  const supportedTypes = PROVIDER_SUPPORTED_TYPES[providerKey] || []
+  if (providerKey === 'easypay' || providerKey === 'xunhupay') {
+    return supportedTypes.some(type => type === 'alipay' || type === 'wxpay') &&
+      (enabled.has('alipay') || enabled.has('wxpay'))
+  }
+
+  return false
 }
 
 /** Available payment modes for EasyPay providers. */
@@ -92,6 +106,7 @@ export function getPaymentPopupFeatures(): string {
 /** Webhook paths for each provider (relative to origin). */
 export const WEBHOOK_PATHS: Record<string, string> = {
   easypay: '/api/v1/payment/webhook/easypay',
+  xunhupay: '/api/v1/payment/webhook/xunhupay',
   alipay: '/api/v1/payment/webhook/alipay',
   wxpay: '/api/v1/payment/webhook/wxpay',
   stripe: '/api/v1/payment/webhook/stripe',
@@ -103,6 +118,7 @@ export const RETURN_PATH = '/payment/result'
 /** Fixed callback paths per provider — displayed as read-only after base URL. */
 export const PROVIDER_CALLBACK_PATHS: Record<string, CallbackPaths> = {
   easypay: { notifyUrl: WEBHOOK_PATHS.easypay, returnUrl: RETURN_PATH },
+  xunhupay: { notifyUrl: WEBHOOK_PATHS.xunhupay, returnUrl: RETURN_PATH },
   alipay: { notifyUrl: WEBHOOK_PATHS.alipay, returnUrl: RETURN_PATH },
   wxpay: { notifyUrl: WEBHOOK_PATHS.wxpay },
   // stripe: 不需要回调 URL 配置，Webhook 单独配置。
@@ -117,6 +133,12 @@ export const PROVIDER_CONFIG_FIELDS: Record<string, ConfigFieldDef[]> = {
     { key: 'apiBase', label: '', sensitive: false },
     { key: 'cidAlipay', label: '', sensitive: false, optional: true },
     { key: 'cidWxpay', label: '', sensitive: false, optional: true },
+  ],
+  xunhupay: [
+    { key: 'appId', label: 'App ID', sensitive: false },
+    { key: 'appSecret', label: '', sensitive: true },
+    { key: 'apiBase', label: '', sensitive: false, defaultValue: 'https://api.xunhupay.com' },
+    { key: 'wapName', label: '', sensitive: false, optional: true },
   ],
   alipay: [
     { key: 'appId', label: 'App ID', sensitive: false },
@@ -177,4 +199,25 @@ export function extractBaseUrl(fullUrl: string, path: string): string {
   if (fullUrl.endsWith(path)) return fullUrl.slice(0, -path.length)
   // Fallback: try to extract origin
   try { return new URL(fullUrl).origin } catch { return fullUrl }
+}
+
+export function getDefaultNotifyBaseUrl(currentOrigin: string, apiBaseUrl?: string): string {
+  const origin = currentOrigin.trim()
+  const apiBase = (apiBaseUrl || '').trim()
+  if (apiBase) {
+    try {
+      return new URL(apiBase, origin || undefined).origin
+    } catch { /* fall through */ }
+  }
+  if (!origin) return ''
+  try {
+    const url = new URL(origin)
+    if (url.protocol === 'http:' && url.port === '3000') {
+      url.port = '8080'
+      return url.origin
+    }
+    return url.origin
+  } catch {
+    return origin
+  }
 }

@@ -132,6 +132,29 @@ describe('PaymentStatusPanel', () => {
     openSpy.mockRestore()
   })
 
+  it('renders hosted QR image URLs directly instead of encoding the URL again', async () => {
+    const wrapper = mount(PaymentStatusPanel, {
+      props: {
+        orderId: 42,
+        qrCode: 'https://api.xunhupay.com/qrcode/ORDER123.png',
+        payUrl: 'https://api.xunhupay.com/payments/wechat/index?hash=abc',
+        expiresAt: '2099-01-01T12:30:00Z',
+        paymentType: 'wxpay',
+        orderType: 'balance',
+      },
+      global: {
+        stubs: {
+          Icon: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.find('img[src="https://api.xunhupay.com/qrcode/ORDER123.png"]').exists()).toBe(true)
+    expect(toCanvas).not.toHaveBeenCalled()
+  })
+
   it('actively verifies a stuck pending order and settles it when upstream confirms payment', async () => {
     pollOrderStatus.mockResolvedValue(orderFactory('PENDING'))
     verifyOrder.mockResolvedValue({

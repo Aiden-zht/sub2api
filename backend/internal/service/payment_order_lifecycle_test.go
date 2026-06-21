@@ -794,6 +794,16 @@ func TestPaymentOrderQueryReferenceUsesOutTradeNoForOfficialProviders(t *testing
 	require.Equal(t, "sub2_out_trade_no", paymentOrderQueryReference(order, paymentFulfillmentTestProvider{
 		key: payment.TypeWxpay,
 	}))
+
+	xunhuOrder := &dbent.PaymentOrder{
+		PaymentType:    payment.TypeWxpay,
+		ProviderKey:    ptrString(payment.TypeXunhuPay),
+		OutTradeNo:     "sub2_xunhu_out_trade_no",
+		PaymentTradeNo: "legacy-response-hash",
+	}
+	require.Equal(t, "sub2_xunhu_out_trade_no", paymentOrderQueryReference(xunhuOrder, paymentFulfillmentTestProvider{
+		key: payment.TypeXunhuPay,
+	}))
 }
 
 func newPaymentOrderLifecycleTestClient(t *testing.T) *dbent.Client {

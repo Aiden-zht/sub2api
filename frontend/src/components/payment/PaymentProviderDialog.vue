@@ -173,7 +173,7 @@
           <div v-if="callbackPaths.notifyUrl">
             <label class="input-label">{{ t('admin.settings.payment.field_notifyUrl') }} <span class="text-red-500">*</span></label>
             <div class="flex">
-              <input v-model="notifyBaseUrl" type="text" class="input min-w-0 flex-1 !rounded-r-none !border-r-0" :placeholder="defaultBaseUrl" />
+              <input v-model="notifyBaseUrl" type="text" class="input min-w-0 flex-1 !rounded-r-none !border-r-0" :placeholder="defaultNotifyBaseUrl" />
               <span class="inline-flex items-center whitespace-nowrap rounded-r-lg border border-gray-300 bg-gray-50 px-3 text-xs text-gray-500 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-400">{{ callbackPaths.notifyUrl }}</span>
             </div>
           </div>
@@ -282,25 +282,26 @@ import {
   STRIPE_SDK_API_VERSION,
   getAvailableTypes,
   extractBaseUrl,
+  getDefaultNotifyBaseUrl,
 } from './providerConfig'
 
 /** Default payment_mode per provider key — "" means "no preference, use
  * provider's built-in default behavior". */
 function defaultPaymentMode(providerKey: string): string {
-  if (providerKey === 'easypay') return PAYMENT_MODE_QRCODE
+  if (providerKey === 'easypay' || providerKey === 'xunhupay') return PAYMENT_MODE_QRCODE
   return ''
 }
 
 /** Provider keys whose admin UI exposes a payment_mode selector.
  * Other providers always send payment_mode = ''. */
 function providerSupportsPaymentMode(providerKey: string): boolean {
-  return providerKey === 'easypay' || providerKey === 'alipay'
+  return providerKey === 'easypay' || providerKey === 'xunhupay' || providerKey === 'alipay'
 }
 
 /** Allowed payment_mode values per provider. Used to coerce DB values
  * from a different provider (or stale data) back to the default. */
 function isValidPaymentMode(providerKey: string, mode: string): boolean {
-  if (providerKey === 'easypay') {
+  if (providerKey === 'easypay' || providerKey === 'xunhupay') {
     return mode === PAYMENT_MODE_QRCODE || mode === PAYMENT_MODE_POPUP
   }
   if (providerKey === 'alipay') {
@@ -368,6 +369,10 @@ const visibleFields = reactive<Record<string, boolean>>({})
 
 // --- Computed ---
 const defaultBaseUrl = typeof window !== 'undefined' ? window.location.origin : ''
+const defaultNotifyBaseUrl = getDefaultNotifyBaseUrl(
+  defaultBaseUrl,
+  import.meta.env.VITE_API_BASE_URL as string | undefined,
+)
 
 const providerWebhookHintMap: Record<string, string> = {
   stripe: 'admin.settings.payment.stripeWebhookHint',
@@ -376,7 +381,7 @@ const providerWebhookHintMap: Record<string, string> = {
 
 const providerWebhookUrl = computed(() => {
   const path = WEBHOOK_PATHS[form.provider_key]
-  return providerWebhookHintMap[form.provider_key] && path ? defaultBaseUrl + path : ''
+  return providerWebhookHintMap[form.provider_key] && path ? defaultNotifyBaseUrl + path : ''
 })
 
 const providerWebhookHint = computed(() =>
@@ -615,7 +620,7 @@ function handleSave() {
   // If base URL is empty, auto-fill with current domain
   const paths = PROVIDER_CALLBACK_PATHS[form.provider_key]
   if (paths) {
-    const notifyBase = notifyBaseUrl.value.trim() || defaultBaseUrl
+    const notifyBase = notifyBaseUrl.value.trim() || defaultNotifyBaseUrl
     const returnBase = returnBaseUrl.value.trim() || defaultBaseUrl
     notifyBaseUrl.value = notifyBase
     returnBaseUrl.value = returnBase

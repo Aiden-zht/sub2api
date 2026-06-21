@@ -5,7 +5,8 @@
       <!-- QR Code mode -->
       <template v-if="qrUrl">
         <div class="rounded-2xl bg-white p-4 shadow-sm dark:bg-dark-800">
-          <canvas ref="qrCanvas" class="mx-auto"></canvas>
+          <img v-if="qrIsImage" :src="qrUrl" alt="" class="mx-auto h-[220px] w-[220px] object-contain" />
+          <canvas v-else ref="qrCanvas" class="mx-auto"></canvas>
         </div>
         <p v-if="scanHint" class="text-center text-sm text-gray-500 dark:text-gray-400">
           {{ scanHint }}
@@ -80,6 +81,7 @@ import { useAppStore } from '@/stores'
 import { paymentAPI } from '@/api/payment'
 import { extractI18nErrorMessage } from '@/utils/apiError'
 import { getPaymentPopupFeatures } from '@/components/payment/providerConfig'
+import { isQRImage } from '@/components/payment/qrRender'
 import type { PaymentOrder } from '@/types/payment'
 import QRCode from 'qrcode'
 import alipayIcon from '@/assets/icons/alipay.svg'
@@ -122,6 +124,7 @@ const VERIFY_RETRY_MAX_ATTEMPTS = 6
 
 const isAlipay = computed(() => props.paymentType.includes('alipay'))
 const isWxpay = computed(() => props.paymentType.includes('wxpay'))
+const qrIsImage = computed(() => isQRImage(qrUrl.value))
 
 const dialogTitle = computed(() => {
   if (success.value) return t('payment.result.success')
@@ -158,7 +161,7 @@ function reopenPopup() {
 
 async function renderQR() {
   await nextTick()
-  if (!qrCanvas.value || !qrUrl.value) return
+  if (!qrCanvas.value || !qrUrl.value || qrIsImage.value) return
   const logoSrc = getLogoForType()
   await QRCode.toCanvas(qrCanvas.value, qrUrl.value, {
     width: 220,

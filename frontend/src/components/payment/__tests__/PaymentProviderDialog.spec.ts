@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import PaymentProviderDialog from '@/components/payment/PaymentProviderDialog.vue'
-import { STRIPE_SDK_API_VERSION } from '@/components/payment/providerConfig'
+import { PAYMENT_MODE_POPUP, STRIPE_SDK_API_VERSION } from '@/components/payment/providerConfig'
 import type { ProviderInstance } from '@/types/payment'
 
 const messages: Record<string, string> = {
@@ -55,6 +55,7 @@ function mountDialog(options: { editing?: ProviderInstance | null } = {}) {
       allKeyOptions: [
         { value: 'alipay', label: 'Alipay' },
         { value: 'wxpay', label: 'WeChat Pay' },
+        { value: 'xunhupay', label: 'XunhuPay' },
         { value: 'stripe', label: 'Stripe' },
         { value: 'airwallex', label: 'Airwallex' },
       ],
@@ -62,6 +63,7 @@ function mountDialog(options: { editing?: ProviderInstance | null } = {}) {
         { value: 'alipay', label: 'Alipay' },
         { value: 'wxpay', label: 'WeChat Pay' },
         { value: 'airwallex', label: 'Airwallex' },
+        { value: 'xunhupay', label: 'XunhuPay' },
       ],
       allPaymentTypes: [
         { value: 'alipay', label: 'Alipay' },
@@ -128,6 +130,37 @@ describe('PaymentProviderDialog payment guide', () => {
     expect(wrapper.text()).toContain(messages['admin.settings.payment.stripeWebhookHint'])
     expect(wrapper.text()).toContain(`Use Stripe API version ${STRIPE_SDK_API_VERSION}.`)
     expect(wrapper.text()).toContain('/api/v1/payment/webhook/stripe')
+  })
+
+  it('supports XunhuPay QR code and popup payment modes', async () => {
+    const provider = providerFactory({
+      provider_key: 'xunhupay',
+      name: 'XunhuPay',
+      config: {
+        appId: 'app_123',
+        apiBase: 'https://api.xunhupay.com',
+      },
+      supported_types: ['alipay', 'wxpay'],
+      payment_mode: 'qrcode',
+    })
+    const wrapper = mountDialog({ editing: provider })
+
+    ;(wrapper.vm as unknown as { loadProvider: (provider: ProviderInstance) => void }).loadProvider(provider)
+    await nextTick()
+
+    expect(wrapper.text()).toContain('admin.settings.payment.modeQRCode')
+    expect(wrapper.text()).toContain('admin.settings.payment.modePopup')
+
+    const popupButton = wrapper
+      .findAll('button')
+      .find(button => button.text() === 'admin.settings.payment.modePopup')
+    expect(popupButton).toBeDefined()
+    await popupButton?.trigger('click')
+
+    await wrapper.find('form').trigger('submit.prevent')
+
+    const payload = wrapper.emitted('save')?.[0]?.[0] as { payment_mode: string }
+    expect(payload.payment_mode).toBe(PAYMENT_MODE_POPUP)
   })
 
   it('emits an empty Airwallex accountId when the admin clears it', async () => {
